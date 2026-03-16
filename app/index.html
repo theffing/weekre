@@ -1,0 +1,963 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Weekre</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+<header>
+  <div class="logo">weekre</div>
+  <div class="week-nav">
+    <button class="week-btn" id="prevWeek">&#8592;</button>
+    <div class="week-label" id="weekLabel"></div>
+    <button class="week-btn" id="nextWeek">&#8594;</button>
+    <button class="week-btn today-btn" id="todayBtn" style="display:none">Today</button>
+  </div>
+  <div class="spacer"></div>
+  <div class="summary-chips">
+    <span class="chip done" id="chipDone">0 done</span>
+    <span class="chip prog" id="chipProg">0 in progress</span>
+    <span class="chip pend" id="chipPend">0 pending</span>
+  </div>
+  <div class="db-path-bar">
+    <button class="week-btn" id="changeDbBtn">Change DB</button>
+  </div>
+</header>
+
+<nav class="tabs">
+  <button class="active" data-tab="week">Week</button>
+  <button data-tab="list">All Tasks</button>
+  <button data-tab="stats">Stats</button>
+</nav>
+
+<div class="main">
+
+  <!-- WEEK VIEW -->
+  <div id="panel-week" class="panel active">
+    <!-- Day header row -->
+    <div class="cal-header" id="calHeader"></div>
+    <!-- Scrollable time grid -->
+    <div class="cal-body" id="calBody">
+      <div class="cal-time-col" id="calTimeCol"></div>
+      <div class="cal-days" id="calDays"></div>
+    </div>
+  </div>
+
+  <!-- LIST VIEW -->
+  <div id="panel-list" class="panel">
+    <div class="list-toolbar">
+      <select id="filterStatus">
+        <option value="">All statuses</option>
+        <option value="pending">Pending</option>
+        <option value="in_progress">In Progress</option>
+        <option value="completed">Completed</option>
+        <option value="cancelled">Cancelled</option>
+      </select>
+      <select id="filterCat">
+        <option value="">All categories</option>
+      </select>
+    </div>
+    <div class="task-table-wrap">
+      <table class="task-table">
+        <thead>
+          <tr>
+            <th data-col="importance" class="sortable">!</th>
+            <th data-col="title" class="sortable">Title</th>
+            <th data-col="category" class="sortable">Category</th>
+            <th data-col="status" class="sortable">Status</th>
+            <th data-col="start_time" class="sortable">Start</th>
+            <th data-col="end_time" class="sortable">End</th>
+            <th data-col="created_at" class="sortable">Created</th>
+            <th>Actions</th>
+          </tr>
+        </thead>
+        <tbody id="taskTableBody"></tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- STATS VIEW -->
+  <div id="panel-stats" class="panel">
+    <div class="stats-summary-row" id="statsSummary"></div>
+    <div class="stats-grid" id="statsGrid"></div>
+  </div>
+
+</div>
+
+<!-- MODAL (edit / new from fab) -->
+<div class="modal-bg" id="modalBg">
+  <div class="modal">
+    <div class="modal-titlebar" id="modalTitle">New Task</div>
+    <div class="modal-body">
+      <h2 id="modalTitleHidden"></h2>
+      <div class="form-row">
+        <label>Title *</label>
+        <input type="text" id="fTitle" placeholder="What needs to be done?" />
+      </div>
+      <div class="form-row">
+        <label>Name / Short label</label>
+        <input type="text" id="fName" placeholder="e.g. PROJ-42" />
+      </div>
+      <div class="form-grid">
+        <div class="form-row">
+          <label>Category</label>
+          <input type="text" id="fCat" placeholder="e.g. Work, Personal" />
+        </div>
+        <div class="form-row">
+          <label>Importance</label>
+          <select id="fImp">
+            <option value="1">1 — Low</option>
+            <option value="2" selected>2 — Medium</option>
+            <option value="3">3 — High</option>
+            <option value="4">4 — Critical</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label>Status</label>
+          <select id="fStatus">
+            <option value="pending">Pending</option>
+            <option value="in_progress">In Progress</option>
+            <option value="completed">Completed</option>
+            <option value="cancelled">Cancelled</option>
+          </select>
+        </div>
+        <div class="form-row">
+          <label>Due date</label>
+          <input type="date" id="fDue" />
+        </div>
+        <div class="form-row">
+          <label>Start time</label>
+          <input type="time" id="fStart" />
+        </div>
+        <div class="form-row">
+          <label>End time</label>
+          <input type="time" id="fEnd" />
+        </div>
+      </div>
+      <div class="form-row">
+        <label>Notes</label>
+        <textarea id="fNotes" placeholder="Optional notes…"></textarea>
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn btn-ghost"   id="cancelBtn">Cancel</button>
+      <button class="btn btn-primary" id="saveBtn">Save Task</button>
+    </div>
+  </div>
+</div>
+
+<script>
+(async () => {
+
+  // ── CONSTANTS ─────────────────────────────────────────────────────
+  const HOUR_H      = 48;   // px per hour
+  const DAY_START   = 0;    // hour to start grid (0 = midnight)
+  const DAY_HOURS   = 24;
+  const SNAP_MINS   = 15;   // snap to 15-min increments
+  const DOW_NAMES   = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+  const IMP_LABEL   = { 1:'Low', 2:'Medium', 3:'High', 4:'Critical' };
+  const IMP_COLORS  = { 1:'var(--imp-low)', 2:'var(--imp-medium)', 3:'var(--imp-high)', 4:'var(--imp-critical)' };
+
+  // ── STATE ─────────────────────────────────────────────────────────
+  let allTasks  = [];
+  let weekOffset = 0;
+  let dragState  = null;   // active drag info
+  let resizeState = null;  // active resize info
+
+  // ── HELPERS ───────────────────────────────────────────────────────
+
+  // toISOString() uses UTC — use this instead to get the local date as YYYY-MM-DD
+  function localDateStr(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${y}-${m}-${day}`;
+  }
+
+  function esc(s) {
+    if (!s) return '';
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+
+  function fmtDate(iso) {
+    if (!iso) return '—';
+    return new Date(iso).toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric'});
+  }
+
+  // "HH:MM" -> minutes from midnight
+  function timeToMins(t) {
+    if (!t) return null;
+    const [h,m] = t.split(':').map(Number);
+    return h * 60 + (m || 0);
+  }
+
+  // minutes -> "HH:MM"
+  function minsToTime(m) {
+    const h = Math.floor(m / 60) % 24;
+    const mm = m % 60;
+    return `${String(h).padStart(2,'0')}:${String(mm).padStart(2,'0')}`;
+  }
+
+  // minutes -> display "2:30 PM"
+  function minsToDisplay(m) {
+    const h24 = Math.floor(m / 60) % 24;
+    const mm  = m % 60;
+    const ampm = h24 >= 12 ? 'PM' : 'AM';
+    const h12 = h24 % 12 || 12;
+    return `${h12}:${String(mm).padStart(2,'0')} ${ampm}`;
+  }
+
+  // px offset from top of grid -> snapped minutes
+  function pxToMins(px) {
+    const raw = (px / HOUR_H) * 60;
+    return Math.round(raw / SNAP_MINS) * SNAP_MINS;
+  }
+
+  function minsToPercent(m) {
+    return ((m - DAY_START * 60) / (DAY_HOURS * 60)) * 100;
+  }
+
+  function getWeekDays() {
+    const now = new Date();
+    const mon = new Date(now);
+    mon.setDate(now.getDate() - ((now.getDay() + 6) % 7) + weekOffset * 7);
+    return Array.from({length:7}, (_,i) => {
+      const d = new Date(mon);
+      d.setDate(mon.getDate() + i);
+      return d;
+    });
+  }
+
+  function isSameDay(dateStr, d) {
+    if (!dateStr) return false;
+    const t = new Date(dateStr);
+    return t.getFullYear()===d.getFullYear() && t.getMonth()===d.getMonth() && t.getDate()===d.getDate();
+  }
+
+  function updateWeekLabel() {
+    const days = getWeekDays();
+    const fmt = d => d.toLocaleDateString('en-US',{month:'short',day:'numeric'});
+    document.getElementById('weekLabel').textContent = `${fmt(days[0])} – ${fmt(days[6])}`;
+    document.getElementById('todayBtn').style.display = weekOffset !== 0 ? 'inline-block' : 'none';
+  }
+
+  // ── DATA ──────────────────────────────────────────────────────────
+  async function loadAll() {
+    try {
+      allTasks = await window.api.listTasks({});
+      await refreshSummaryChips();
+      renderCurrentTab();
+    } catch(e) { console.error('loadAll failed:', e); }
+  }
+
+  async function refreshSummaryChips() {
+    const s = await window.api.statsSummary();
+    document.getElementById('chipDone').textContent = `${s.completed||0} done`;
+    document.getElementById('chipProg').textContent = `${s.in_progress||0} in progress`;
+    document.getElementById('chipPend').textContent = `${s.pending||0} pending`;
+  }
+
+  // ── CALENDAR RENDER ───────────────────────────────────────────────
+  function renderWeek() {
+    const days  = getWeekDays();
+    const today = new Date();
+    const totalH = DAY_HOURS * HOUR_H;
+
+    // ── Header row ──
+    const hdr = document.getElementById('calHeader');
+    hdr.innerHTML = '<div class="cal-gutter"></div>' +
+      days.map((d,i) => {
+        const isToday = isSameDay(today.toISOString(), d);
+        return `<div class="cal-hdr-day${isToday?' today':''}" data-day-idx="${i}">
+          <span class="cal-hdr-dow">${DOW_NAMES[d.getDay()]}</span>
+          <span class="cal-hdr-num">${d.getDate()}</span>
+        </div>`;
+      }).join('');
+
+    // ── Time gutter ──
+    const gutter = document.getElementById('calTimeCol');
+    gutter.innerHTML = '';
+    gutter.style.height = totalH + 'px';
+    for (let h = 0; h < DAY_HOURS; h++) {
+      const lbl = document.createElement('div');
+      lbl.className = 'cal-hour-lbl';
+      lbl.style.top = (h * HOUR_H) + 'px';
+      const ampm = h >= 12 ? 'PM' : 'AM';
+      const h12  = h % 12 || 12;
+      lbl.textContent = h === 0 ? '' : `${h12} ${ampm}`;
+      gutter.appendChild(lbl);
+    }
+
+    // ── Day columns ──
+    const daysEl = document.getElementById('calDays');
+    daysEl.innerHTML = '';
+
+    days.forEach((day, di) => {
+      const col = document.createElement('div');
+      col.className = 'cal-day-col' + (isSameDay(today.toISOString(), day) ? ' today' : '');
+      col.style.height = totalH + 'px';
+      col.dataset.dayIdx = di;
+
+      // Hour lines
+      for (let h = 0; h < DAY_HOURS; h++) {
+        const line = document.createElement('div');
+        line.className = 'cal-hour-line' + (h === 0 ? ' first' : '');
+        line.style.top = (h * HOUR_H) + 'px';
+        col.appendChild(line);
+        // half-hour line
+        const half = document.createElement('div');
+        half.className = 'cal-half-line';
+        half.style.top = (h * HOUR_H + HOUR_H / 2) + 'px';
+        col.appendChild(half);
+      }
+
+      // Click to create task
+      // Use mousedown+mouseup pair to distinguish click from drag start
+      let clickStartY = null;
+      col.addEventListener('mousedown', e => {
+        if (e.button !== 0) return;
+        if (e.target.closest('.cal-block')) return;
+        clickStartY = e.clientY;
+      });
+      col.addEventListener('mouseup', e => {
+        if (e.button !== 0) return;
+        if (e.target.closest('.cal-block')) { clickStartY = null; return; }
+        if (clickStartY === null) return;
+        // Only treat as click if mouse didn't move much (not a scroll drag)
+        if (Math.abs(e.clientY - clickStartY) > 5) { clickStartY = null; return; }
+        clickStartY = null;
+        // If there's already an open inline block, close it
+        const existing = document.querySelector('.cal-block-inline');
+        if (existing) { existing.remove(); return; }
+        const calBody = document.getElementById('calBody');
+        const bodyRect = calBody.getBoundingClientRect();
+        // clientY relative to calBody's visible top, then add scroll offset
+        // gives absolute px position within the full-height column
+        const yInCol = (e.clientY - bodyRect.top) + calBody.scrollTop;
+        const startMins = Math.max(0, Math.min(pxToMins(yInCol), DAY_HOURS * 60 - 60));
+        const endMins = startMins + 60;
+        createInlineBlock(col, day, startMins, endMins);
+      });
+
+      // Render tasks for this day
+      const dayTasks = allTasks.filter(t => isSameDay(t.created_at, day));
+      dayTasks.forEach(t => {
+        const block = buildTaskBlock(t, col);
+        if (block) col.appendChild(block);
+      });
+
+      daysEl.appendChild(col);
+    });
+
+    // Scroll to 8am after paint so the element has height
+    requestAnimationFrame(() => {
+      const body = document.getElementById('calBody');
+      body.scrollTop = 8 * HOUR_H - 20;
+    });
+  }
+
+  // ── TASK BLOCK ────────────────────────────────────────────────────
+  function buildTaskBlock(task, col) {
+    const startMins = timeToMins(task.start_time) ?? 8 * 60;
+    const endMins   = timeToMins(task.end_time)   ?? startMins + 60;
+    const dur       = Math.max(endMins - startMins, SNAP_MINS);
+
+    const top    = (startMins / 60) * HOUR_H;
+    const height = (dur / 60) * HOUR_H;
+
+    const el = document.createElement('div');
+    el.className = 'cal-block' + (task.status === 'completed' ? ' done' : '');
+    el.dataset.id = task.id;
+    el.style.top    = top + 'px';
+    el.style.height = height + 'px';
+    el.style.borderLeftColor = IMP_COLORS[task.importance] || 'var(--imp-medium)';
+
+    el.innerHTML = `
+      <div class="cal-block-time">${minsToDisplay(startMins)} – ${minsToDisplay(startMins + dur)}</div>
+      <div class="cal-block-title">${esc(task.title || 'Untitled')}</div>
+      ${task.category ? `<div class="cal-block-cat">[${esc(task.category)}]</div>` : ''}
+      <div class="cal-block-actions">
+        ${task.status !== 'completed' ? `<button class="blk-btn green" data-action="complete" data-id="${task.id}">✓</button>` : ''}
+        <button class="blk-btn red" data-action="delete" data-id="${task.id}">✕</button>
+      </div>
+      <div class="cal-block-resize"></div>
+    `;
+
+    // Action buttons
+    el.querySelectorAll('[data-action]').forEach(btn => {
+      btn.addEventListener('mousedown', e => e.stopPropagation());
+      btn.addEventListener('click', e => {
+        e.stopPropagation();
+        handleAction(btn.dataset.action, Number(btn.dataset.id));
+      });
+    });
+
+    // Drag to move
+    el.addEventListener('mousedown', e => {
+      if (e.target.closest('.cal-block-resize') || e.target.closest('.blk-btn')) return;
+      e.preventDefault();
+      e.stopPropagation();
+
+      const calBody = document.getElementById('calBody');
+      const bodyRect = calBody.getBoundingClientRect();
+      const blockRect = el.getBoundingClientRect();
+
+      // offsetY in screen px — how far from block top the user grabbed
+      const offsetY = e.clientY - blockRect.top;
+
+      // Duration to preserve
+      const oldStart = timeToMins(task.start_time) ?? 8 * 60;
+      const oldEnd   = timeToMins(task.end_time)   ?? oldStart + 60;
+      const dur = Math.max(oldEnd - oldStart, SNAP_MINS);
+
+      // Create a lightweight ghost that follows the cursor (fixed position, outside columns)
+      const ghost = document.createElement('div');
+      ghost.className = 'cal-block drag-ghost';
+      ghost.style.cssText = [
+        'position:fixed',
+        'pointer-events:none',
+        'z-index:1000',
+        'width:120px',
+        'opacity:0.85',
+        `height:${blockRect.height}px`,
+        `top:${blockRect.top}px`,
+        `left:${blockRect.left}px`,
+        `border-left:3px solid ${el.style.borderLeftColor}`,
+      ].join(';');
+      ghost.innerHTML = el.innerHTML;
+      document.body.appendChild(ghost);
+
+      el.classList.add('dragging');
+
+      dragState = {
+        taskId: task.id,
+        el,
+        offsetY,
+        dur,
+        ghost,
+        snappedMins: null,
+      };
+    });
+
+    // Right-click → inline edit
+    el.addEventListener('contextmenu', e => {
+      e.preventDefault();
+      e.stopPropagation();
+    });
+
+    // Resize handle
+    el.querySelector('.cal-block-resize').addEventListener('mousedown', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      const currentTop = parseFloat(el.style.top);
+      const currentStartMins = Math.round(currentTop / HOUR_H * 60);
+      resizeState = { taskId: task.id, el, startMins: currentStartMins, col };
+      el.classList.add('resizing');
+    });
+
+    return el;
+  }
+
+  // ── DRAG & RESIZE (global mouse events) ───────────────────────────
+
+  // Returns { dayIdx, col } for the column under a given clientX,
+  // by measuring the BODY columns directly (not the header).
+  function getColAtX(clientX) {
+    const cols = document.querySelectorAll('.cal-day-col');
+    for (const col of cols) {
+      const r = col.getBoundingClientRect();
+      if (clientX >= r.left && clientX < r.right) {
+        return { col, dayIdx: parseInt(col.dataset.dayIdx) };
+      }
+    }
+    return null;
+  }
+
+  document.addEventListener('mousemove', e => {
+    if (dragState) {
+      const { el, offsetY, ghost } = dragState;
+      const calBody = document.getElementById('calBody');
+      const bodyRect = calBody.getBoundingClientRect();
+
+      // Compute snapped time from cursor Y
+      const yInCol = (e.clientY - bodyRect.top) + calBody.scrollTop;
+      const rawMins = pxToMins(yInCol - offsetY);
+      const snapped = Math.max(0, Math.min(rawMins, DAY_HOURS * 60 - 30));
+
+      // Move the ghost (fixed overlay) — follows cursor directly
+      ghost.style.top  = e.clientY - offsetY * (parseFloat(ghost.style.height) / (parseFloat(el.style.height)||1) || 1) + 'px';
+      ghost.style.left = e.clientX - 30 + 'px';
+      ghost.querySelector('.cal-block-time').textContent =
+        minsToDisplay(snapped) + ' – ' + minsToDisplay(snapped + dragState.dur);
+
+      // Highlight the column we're hovering
+      document.querySelectorAll('.cal-day-col').forEach(c => c.classList.remove('drag-over'));
+      const hit = getColAtX(e.clientX);
+      if (hit) hit.col.classList.add('drag-over');
+
+      dragState.snappedMins = snapped;
+    }
+
+    if (resizeState) {
+      const { el, startMins } = resizeState;
+      const calBody = document.getElementById('calBody');
+      const bodyRect = calBody.getBoundingClientRect();
+      const rawEnd = pxToMins((e.clientY - bodyRect.top) + calBody.scrollTop);
+      const snapped = Math.max(startMins + SNAP_MINS, Math.min(rawEnd, DAY_HOURS * 60));
+      el.style.height = ((snapped - startMins) / 60 * HOUR_H) + 'px';
+      el.querySelector('.cal-block-time').textContent =
+        minsToDisplay(startMins) + ' – ' + minsToDisplay(snapped);
+    }
+  });
+
+  document.addEventListener('mouseup', async e => {
+    if (dragState) {
+      const { el, taskId, ghost, snappedMins, dur } = dragState;
+      el.classList.remove('dragging');
+      ghost.remove();
+      document.querySelectorAll('.cal-day-col').forEach(c => c.classList.remove('drag-over'));
+
+      // Determine target column from drop X
+      const hit = getColAtX(e.clientX);
+      if (!hit) { dragState = null; await loadAll(); return; }
+
+      const days = getWeekDays();
+      const newDay  = days[hit.dayIdx];
+      const newStart = snappedMins ?? Math.round(parseFloat(el.style.top) / HOUR_H * 60);
+      const newEnd   = newStart + dur;
+      const iso = localDateStr(newDay);
+
+      await window.api.updateTask(taskId, {
+        created_at: iso + 'T' + minsToTime(newStart) + ':00',
+        start_time: minsToTime(newStart),
+        end_time:   minsToTime(newEnd),
+      });
+      dragState = null;
+      await loadAll();
+    }
+
+    if (resizeState) {
+      const { el, taskId, startMins } = resizeState;
+      el.classList.remove('resizing');
+      const newHeight = parseFloat(el.style.height);
+      const newEndMins = Math.round(newHeight / HOUR_H * 60) + startMins;
+      await window.api.updateTask(taskId, {
+        end_time: minsToTime(newEndMins),
+      });
+      resizeState = null;
+      await loadAll();
+    }
+  });
+
+  // ── INLINE NOTEPAD BLOCK ──────────────────────────────────────────
+  function createInlineBlock(col, day, startMins, endMins) {
+    document.querySelectorAll('.cal-block-inline').forEach(b => b.remove());
+
+    const el = document.createElement('div');
+    el.className = 'cal-block cal-block-inline';
+    el.style.top    = (startMins / 60 * HOUR_H) + 'px';
+    el.style.height = 'auto';
+    el.style.minHeight = Math.max((endMins - startMins) / 60 * HOUR_H, HOUR_H * 2) + 'px';
+    el.style.zIndex = '50';
+
+    // Build fields manually so we have direct references (no innerHTML query needed)
+    const timeLabel = document.createElement('div');
+    timeLabel.className = 'inline-time';
+    timeLabel.textContent = minsToDisplay(startMins);
+
+    const fields = document.createElement('div');
+    fields.className = 'inline-fields';
+
+    const fTitle = document.createElement('input');
+    fTitle.className = 'inline-input';
+    fTitle.placeholder = 'Title…';
+    fTitle.autocomplete = 'off';
+
+    const fCat = document.createElement('input');
+    fCat.className = 'inline-input';
+    fCat.placeholder = 'Category…';
+    fCat.autocomplete = 'off';
+
+    const fEnd = document.createElement('input');
+    fEnd.className = 'inline-input';
+    fEnd.placeholder = 'End time (e.g. 3:30pm)…';
+    fEnd.value = minsToDisplay(endMins);
+    fEnd.autocomplete = 'off';
+
+    const fNotes = document.createElement('textarea');
+    fNotes.className = 'inline-input';
+    fNotes.placeholder = 'Notes…';
+    fNotes.rows = 2;
+
+    // Priority text input
+    const impRow = document.createElement('input');
+    impRow.className = 'inline-input';
+    impRow.placeholder = 'Priority: low / med / high';
+    impRow.autocomplete = 'off';
+
+    // Action buttons
+    const actRow = document.createElement('div');
+    actRow.className = 'inline-actions';
+
+    const saveBtn = document.createElement('button');
+    saveBtn.className = 'blk-btn green';
+    saveBtn.textContent = 'Save';
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.className = 'blk-btn red';
+    cancelBtn.textContent = '✕ Discard';
+
+    actRow.appendChild(saveBtn);
+    actRow.appendChild(cancelBtn);
+
+    fields.appendChild(fTitle);
+    fields.appendChild(fCat);
+    fields.appendChild(fEnd);
+    fields.appendChild(fNotes);
+    fields.appendChild(impRow);
+    fields.appendChild(actRow);
+
+    el.appendChild(timeLabel);
+    el.appendChild(fields);
+    col.appendChild(el);
+
+    // Stop mousedown/mouseup on the block from bubbling to column
+    el.addEventListener('mousedown', e => e.stopPropagation());
+    el.addEventListener('mouseup',   e => e.stopPropagation());
+
+    setTimeout(() => fTitle.focus(), 0);
+
+    // ── Core save function ─────────────────────────────────────────
+    async function doSave() {
+      const endRaw = fEnd.value.trim();
+      let parsedEnd = endMins;
+      const m = endRaw.match(/(\d+):?(\d{0,2})\s*(am|pm)/i);
+      if (m) {
+        let h = parseInt(m[1]);
+        const mm = parseInt(m[2] || '0');
+        if (m[3].toLowerCase() === 'pm' && h !== 12) h += 12;
+        if (m[3].toLowerCase() === 'am' && h === 12) h = 0;
+        parsedEnd = h * 60 + mm;
+      }
+      const impMap = { low: 1, med: 2, medium: 2, high: 3 };
+      const impVal = impMap[impRow.value.trim().toLowerCase()] ?? 2;
+      const iso = localDateStr(day);
+      await window.api.createTask({
+        title:               fTitle.value.trim() || 'Untitled',
+        category:            fCat.value.trim()   || 'General',
+        notes:               fNotes.value.trim() || null,
+        importance:          impVal,
+        status:              'pending',
+        start_time:          minsToTime(startMins),
+        end_time:            minsToTime(parsedEnd),
+        due_at:              null,
+        created_at_override: iso,
+      });
+      el.remove();
+      await loadAll();
+    }
+
+    // ── Discard ───────────────────────────────────────────────────
+    function doDiscard() { el.remove(); }
+
+    // Buttons
+    saveBtn.addEventListener('click', async e => {
+      e.stopPropagation();
+      try { await doSave(); }
+      catch(err) { console.error('Inline save failed:', err); }
+    });
+    cancelBtn.addEventListener('click', e => { e.stopPropagation(); doDiscard(); });
+
+    // Click outside the block → save
+    function onDocClick(e) {
+      if (el.contains(e.target)) return;   // click was inside block
+      document.removeEventListener('mousedown', onDocClick, true);
+      // only save if title has content, otherwise discard silently
+      if (fTitle.value.trim()) {
+        doSave().catch(err => console.error('Click-outside save failed:', err));
+      } else {
+        doDiscard();
+      }
+    }
+    // Use capture so it fires before column's mouseup handler
+    setTimeout(() => document.addEventListener('mousedown', onDocClick, true), 0);
+
+    // Keyboard shortcuts
+    fTitle.addEventListener('keydown', e => {
+      if (e.key === 'Enter')  { e.preventDefault(); fCat.focus(); }
+      if (e.key === 'Escape') { document.removeEventListener('mousedown', onDocClick, true); doDiscard(); }
+    });
+    fCat.addEventListener('keydown', e => {
+      if (e.key === 'Enter')  { e.preventDefault(); fEnd.focus(); }
+      if (e.key === 'Escape') { document.removeEventListener('mousedown', onDocClick, true); doDiscard(); }
+    });
+    fEnd.addEventListener('keydown', e => {
+      if (e.key === 'Enter')  { e.preventDefault(); impRow.focus(); }
+      if (e.key === 'Escape') { document.removeEventListener('mousedown', onDocClick, true); doDiscard(); }
+    });
+    impRow.addEventListener('keydown', e => {
+      if (e.key === 'Enter')  { e.preventDefault(); fNotes.focus(); }
+      if (e.key === 'Escape') { document.removeEventListener('mousedown', onDocClick, true); doDiscard(); }
+    });
+  }
+
+
+    // ── LIST SORT STATE ───────────────────────────────────────────────
+  let listSortCol = 'created_at';
+  let listSortDir = 'desc'; // 'asc' or 'desc'
+
+  function sortTasks(tasks) {
+    const col = listSortCol;
+    const dir = listSortDir === 'asc' ? 1 : -1;
+    return [...tasks].sort((a, b) => {
+      let av = a[col] ?? '';
+      let bv = b[col] ?? '';
+      // numeric cols
+      if (col === 'importance') { av = Number(av); bv = Number(bv); }
+      // string compare
+      if (av < bv) return -1 * dir;
+      if (av > bv) return  1 * dir;
+      return 0;
+    });
+  }
+
+  function updateSortHeaders() {
+    document.querySelectorAll('th.sortable').forEach(th => {
+      const col = th.dataset.col;
+      const arrow = col === listSortCol ? (listSortDir === 'asc' ? ' ▲' : ' ▼') : '';
+      // strip old arrow and re-add
+      th.textContent = th.textContent.replace(/ [▲▼]$/, '') + arrow;
+    });
+  }
+
+  // Wire header clicks once
+  let listHeadersBound = false;
+  function bindListHeaders() {
+    if (listHeadersBound) return;
+    listHeadersBound = true;
+    document.querySelectorAll('th.sortable').forEach(th => {
+      th.style.cursor = 'pointer';
+      th.title = 'Click to sort';
+      th.addEventListener('click', () => {
+        const col = th.dataset.col;
+        if (listSortCol === col) {
+          listSortDir = listSortDir === 'asc' ? 'desc' : 'asc';
+        } else {
+          listSortCol = col;
+          listSortDir = 'asc';
+        }
+        renderList();
+      });
+    });
+  }
+
+  // ── LIST RENDER ───────────────────────────────────────────────────
+  async function renderList() {
+    bindListHeaders();
+
+    const status = document.getElementById('filterStatus').value;
+    const cat    = document.getElementById('filterCat').value;
+    const raw    = await window.api.listTasks({ status: status||undefined, category: cat||undefined });
+    const tasks  = sortTasks(raw);
+
+    const cats = [...new Set(allTasks.map(t => t.category).filter(Boolean))];
+    const catSel = document.getElementById('filterCat');
+    const curVal = catSel.value;
+    catSel.innerHTML = '<option value="">All categories</option>' +
+      cats.map(c => `<option value="${c}" ${c===curVal?'selected':''}>${esc(c)}</option>`).join('');
+
+    updateSortHeaders();
+
+    const tbody = document.getElementById('taskTableBody');
+    tbody.innerHTML = '';
+    tasks.forEach(t => {
+      const tr = document.createElement('tr');
+      tr.dataset.imp = t.importance;
+      tr.innerHTML = `
+        <td class="imp-cell"></td>
+        <td>${esc(t.title)}</td>
+        <td><span class="tag">${esc(t.category||'—')}</span></td>
+        <td><span class="status-badge s-${t.status}">${t.status.replace('_',' ')}</span></td>
+        <td style="font-family:var(--mono);font-size:11px">${t.start_time||'—'}</td>
+        <td style="font-family:var(--mono);font-size:11px">${t.end_time||'—'}</td>
+        <td style="font-family:var(--mono);font-size:11px;color:var(--muted)">${fmtDate(t.created_at)}</td>
+        <td>
+          <div style="display:flex;gap:6px">
+            ${t.status !== 'completed' ? `<button class="btn-xs green" data-action="complete" data-id="${t.id}">✓</button>` : ''}
+            <button class="btn-xs" data-action="edit" data-id="${t.id}">Edit</button>
+            <button class="btn-xs red" data-action="delete" data-id="${t.id}">✕</button>
+          </div>
+        </td>
+      `;
+      tr.querySelectorAll('[data-action]').forEach(btn =>
+        btn.addEventListener('click', () => handleAction(btn.dataset.action, Number(btn.dataset.id)))
+      );
+      tbody.appendChild(tr);
+    });
+  }
+
+  // ── STATS ─────────────────────────────────────────────────────────
+  function buildBars(data, labelFn, valFn, barColor, countFn) {
+    if (!data.length) return '<span class="stat-empty">No data yet</span>';
+    const max = Math.max(...data.map(valFn), 1);
+    return data.map(row => `
+      <div class="bar-row">
+        <div class="bar-label" title="${labelFn(row)}">${labelFn(row)}</div>
+        <div class="bar-track">
+          <div class="bar-fill" style="width:${(valFn(row)/max*100).toFixed(1)}%;background:${barColor}"></div>
+        </div>
+        <div class="bar-count">${countFn ? countFn(row) : valFn(row)}</div>
+      </div>`).join('');
+  }
+
+  function addStatCard(id, title, htmlFn) { STAT_CARDS.push({ id, title, htmlFn }); }
+
+  async function renderStats() {
+    const summary = await window.api.statsSummary();
+    document.getElementById('statsSummary').innerHTML = [
+      { n: summary.total||0,       l:'Total',       cls:'total'    },
+      { n: summary.completed||0,   l:'Completed',   cls:'done'     },
+      { n: summary.in_progress||0, l:'In Progress', cls:'progress' },
+      { n: summary.pending||0,     l:'Pending',     cls:'pending'  },
+      { n: summary.cancelled||0,   l:'Cancelled',   cls:'cancelled'},
+    ].map(({n,l,cls}) => `<div class="stat-big ${cls}"><div class="num">${n}</div><div class="lbl">${l}</div></div>`).join('');
+
+    const grid = document.getElementById('statsGrid');
+    for (const card of STAT_CARDS) {
+      if (!document.getElementById(card.id)) {
+        const el = document.createElement('div');
+        el.className = 'stat-card';
+        el.innerHTML = `<div class="stat-card-title">${card.title}</div><div class="stat-card-body" id="${card.id}"></div>`;
+        grid.appendChild(el);
+      }
+    }
+    await Promise.all(STAT_CARDS.map(async card => {
+      const body = document.getElementById(card.id);
+      try { body.innerHTML = await card.htmlFn(); }
+      catch(e) { body.innerHTML = '<span class="stat-empty">Error</span>'; console.error(e); }
+    }));
+  }
+
+  const STAT_CARDS = [];
+  addStatCard('statsDow',   'Completions by Day of Week', async () => buildBars(await window.api.statsByDay(),      d => DOW_NAMES[d.dow], d => d.count, 'var(--bar-dow)'));
+  addStatCard('statsMonth', 'Completions by Month',       async () => buildBars(await window.api.statsByMonth(),    d => d.month,          d => d.count, 'var(--bar-month)'));
+  addStatCard('statsWeek',  'Completions by Week',        async () => buildBars(await window.api.statsByWeek(),     d => d.week,           d => d.count, 'var(--bar-week)'));
+  addStatCard('statsCat',   'Tasks by Category',          async () => buildBars(await window.api.statsByCategory(), d => d.category,       d => d.total, 'var(--bar-cat)', d => `${d.done}/${d.total}`));
+
+  // ── TABS ──────────────────────────────────────────────────────────
+  function renderCurrentTab() {
+    const active = document.querySelector('nav.tabs button.active').dataset.tab;
+    if (active === 'week')  renderWeek();
+    if (active === 'list')  renderList();
+    if (active === 'stats') renderStats();
+  }
+
+  document.querySelectorAll('nav.tabs button').forEach(btn => {
+    btn.addEventListener('click', () => {
+      document.querySelectorAll('nav.tabs button').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+      document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+      document.getElementById('panel-' + btn.dataset.tab).classList.add('active');
+      renderCurrentTab();
+    });
+  });
+
+  // ── ACTIONS ───────────────────────────────────────────────────────
+  async function handleAction(action, id) {
+    if (action === 'complete') { await window.api.completeTask(id); await loadAll(); }
+    else if (action === 'delete')  { await window.api.deleteTask(id);  await loadAll(); }
+    else if (action === 'edit') {
+      const t = allTasks.find(x => x.id === id);
+      if (!t) return;
+      editingId = id;
+      document.getElementById('modalTitle').textContent  = 'Edit Task';
+      document.getElementById('fTitle').value    = t.title || '';
+      document.getElementById('fName').value     = t.name || '';
+      document.getElementById('fCat').value      = t.category || '';
+      document.getElementById('fImp').value      = t.importance || 2;
+      document.getElementById('fStatus').value   = t.status || 'pending';
+      document.getElementById('fDue').value      = t.due_at ? t.due_at.slice(0,10) : '';
+      document.getElementById('fStart').value    = t.start_time || '';
+      document.getElementById('fEnd').value      = t.end_time || '';
+      document.getElementById('fNotes').value    = t.notes || '';
+      openModal();
+    }
+  }
+
+  let editingId = null;
+
+  // ── MODAL ─────────────────────────────────────────────────────────
+  function openModal() {
+    document.getElementById('modalBg').classList.add('open');
+    document.getElementById('fTitle').focus();
+  }
+  function closeModal() {
+    document.getElementById('modalBg').classList.remove('open');
+    editingId = null;
+    ['fTitle','fName','fCat','fDue','fStart','fEnd','fNotes'].forEach(id => document.getElementById(id).value = '');
+    document.getElementById('fImp').value    = '2';
+    document.getElementById('fStatus').value = 'pending';
+    document.getElementById('modalTitle').textContent = 'New Task';
+    const sb = document.getElementById('saveBtn');
+    sb.disabled = false; sb.textContent = 'Save Task'; sb.style.background = '';
+  }
+
+  document.getElementById('cancelBtn').addEventListener('click', closeModal);
+  document.getElementById('modalBg').addEventListener('click', e => {
+    if (e.target === document.getElementById('modalBg')) closeModal();
+  });
+
+  document.getElementById('saveBtn').addEventListener('click', async () => {
+    const title = document.getElementById('fTitle').value.trim();
+    if (!title) { document.getElementById('fTitle').focus(); return; }
+    const saveBtn = document.getElementById('saveBtn');
+    saveBtn.disabled = true; saveBtn.textContent = 'Saving…';
+    try {
+      const task = {
+        title,
+        name:       document.getElementById('fName').value.trim()   || null,
+        category:   document.getElementById('fCat').value.trim()    || 'General',
+        importance: Number(document.getElementById('fImp').value),
+        status:     document.getElementById('fStatus').value,
+        due_at:     document.getElementById('fDue').value           || null,
+        start_time: document.getElementById('fStart').value         || null,
+        end_time:   document.getElementById('fEnd').value           || null,
+        notes:      document.getElementById('fNotes').value.trim()  || null,
+      };
+      if (editingId) await window.api.updateTask(editingId, task);
+      else           await window.api.createTask(task);
+      closeModal();
+      await loadAll();
+    } catch(err) {
+      console.error('Save failed:', err);
+      saveBtn.textContent = 'Error — see console';
+      saveBtn.style.background = 'var(--imp-critical)';
+      setTimeout(() => { saveBtn.disabled=false; saveBtn.textContent='Save Task'; saveBtn.style.background=''; }, 2500);
+    }
+  });
+
+  document.getElementById('filterStatus').addEventListener('change', renderList);
+  document.getElementById('filterCat').addEventListener('change',    renderList);
+
+  // ── DB ────────────────────────────────────────────────────────────
+  document.getElementById('changeDbBtn').addEventListener('click', async () => {
+    await window.api.chooseDbPath();
+  });
+
+  // ── WEEK NAV ──────────────────────────────────────────────────────
+  document.getElementById('prevWeek').addEventListener('click',  () => { weekOffset--; updateWeekLabel(); renderWeek(); });
+  document.getElementById('nextWeek').addEventListener('click',  () => { weekOffset++; updateWeekLabel(); renderWeek(); });
+  document.getElementById('todayBtn').addEventListener('click',  () => { weekOffset=0; updateWeekLabel(); renderWeek(); });
+
+  // ── INIT ──────────────────────────────────────────────────────────
+  updateWeekLabel();
+  await loadAll();   // calls renderCurrentTab → renderWeek on first load
+
+})();
+</script>
+
+</body>
+</html>
